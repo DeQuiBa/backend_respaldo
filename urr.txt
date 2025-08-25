@@ -1,0 +1,28 @@
+CREATE TABLE comite (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    epoca INT NOT NULL -- 2025, 2026, etc.
+);
+
+
+CREATE TABLE usuarios (
+    id SERIAL PRIMARY KEY,
+    nombres VARCHAR(100) NOT NULL,
+    apellidos VARCHAR(100) NOT NULL,
+    email VARCHAR(150) UNIQUE NOT NULL,
+    contrasena VARCHAR(255) NOT NULL,
+    fk_comite INT REFERENCES comite(id) ON DELETE SET NULL,
+    rol VARCHAR(20) NOT NULL CHECK (rol IN ('ADMIN','USUARIO'))
+);
+
+
+CREATE TABLE monto (
+    id SERIAL PRIMARY KEY,
+    fk_usuario INT REFERENCES usuarios(id) ON DELETE CASCADE,
+    fecha DATE NOT NULL,
+    tipo_de_cuenta VARCHAR(20) NOT NULL CHECK (tipo_de_cuenta IN ('Ingreso','Egreso')),
+    actividad TEXT NOT NULL,
+    codigo VARCHAR(50),
+    voucher BYTEA,   -- O ruta de archivo si prefieres
+    cantidad NUMERIC(12,2) NOT NULL
+);
