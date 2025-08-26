@@ -1,0 +1,11 @@
+POST http://localhost:3050/api/register
+Content-Type: application/json
+
+{
+  "nombres": "Shelton",
+  "apellidos": "Quinteros",
+  "email": "prueb@test.com",
+  "password": "12345678",
+  "fk_rol": 2,
+  "fk_comite": "1"
+}

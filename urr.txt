@@ -1,21 +1,35 @@
+-- 1. Comite
 CREATE TABLE comite (
     id SERIAL PRIMARY KEY,
     nombre VARCHAR(100) NOT NULL,
-    epoca INT NOT NULL -- 2025, 2026, etc.
+    epoca INT NOT NULL
 );
 
+-- 2. Roles
+CREATE TABLE roles (
+    id SERIAL PRIMARY KEY,
+    nombre_rol VARCHAR(50) NOT NULL UNIQUE,
+    descripcion TEXT,
+    estado VARCHAR(20) DEFAULT 'activo' CHECK (estado IN ('activo','inactivo')),
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
+-- 3. Usuarios
 CREATE TABLE usuarios (
     id SERIAL PRIMARY KEY,
     nombres VARCHAR(100) NOT NULL,
     apellidos VARCHAR(100) NOT NULL,
     email VARCHAR(150) UNIQUE NOT NULL,
-    contrasena VARCHAR(255) NOT NULL,
+    password VARCHAR(255) NOT NULL,
     fk_comite INT REFERENCES comite(id) ON DELETE SET NULL,
-    rol VARCHAR(20) NOT NULL CHECK (rol IN ('ADMIN','USUARIO'))
+    fk_rol INT REFERENCES roles(id) NOT NULL,
+    estado VARCHAR(20) DEFAULT 'activo' CHECK (estado IN ('activo','inactivo')),
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-
+-- 4. Monto
 CREATE TABLE monto (
     id SERIAL PRIMARY KEY,
     fk_usuario INT REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -23,6 +37,16 @@ CREATE TABLE monto (
     tipo_de_cuenta VARCHAR(20) NOT NULL CHECK (tipo_de_cuenta IN ('Ingreso','Egreso')),
     actividad TEXT NOT NULL,
     codigo VARCHAR(50),
-    voucher BYTEA,   -- O ruta de archivo si prefieres
+    voucher BYTEA,
     cantidad NUMERIC(12,2) NOT NULL
+);
+
+-- 5. Password resets
+CREATE TABLE password_resets (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    token VARCHAR(255) NOT NULL UNIQUE,
+    expires_at TIMESTAMP NOT NULL,
+    used BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

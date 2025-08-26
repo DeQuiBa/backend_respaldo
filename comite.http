@@ -1,0 +1,2 @@
+GET http://localhost:3050/api/comite
+Content-Type: application/json
