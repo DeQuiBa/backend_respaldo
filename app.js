@@ -8,12 +8,21 @@
   const { enviarCorreo } = require("./email/emailService");
   const crypto = require('crypto');
   const bcrypt = require('bcrypt');
+  
+  const { router_monto } = require('./routes/monto.routes');
+  const { router_comite } = require('./routes/comite.routes');
+  const { router_roles } = require('./routes/roles.routes');
+  const { swaggerUi, swaggerSpec } = require('./config/swagger');
 
   dotenv.config();
 
   //s Configuración de Express
   const app = express();
   app.use(express.json());
+
+  // ver la documentacion de APIS
+  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
 
   // CORS
   const corsOptions = {
@@ -46,6 +55,7 @@
   const PORT = process.env.PORT || 3050;
   app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
+    console.log(`Docs Swagger en http://localhost:${PORT}/api-docs`);
   });
 
 
@@ -247,16 +257,7 @@
   // ===================================================
   // registro de usuarios
   // ===================================================
-  // GET /api/comite
-  app.get('/api/comite', async (req, res) => {
-    try {
-      const result = await pool.query('SELECT id, nombre FROM comite ORDER BY nombre');
-      res.json({ comites: result.rows });
-    } catch (err) {
-      console.error('Error obteniendo comités:', err);
-      res.status(500).json({ error: 'Error obteniendo comités' });
-    }
-  });
+  
 
   //POST /api/register
   app.post('/api/register', async (req, res) => {
@@ -278,7 +279,7 @@
       );
 
       console.log('Resultado de la consulta:', result.rows[0]);
-      res.json({ message: 'Usuario creado', user: result.rows[0] });
+      return res.json({ message: 'Usuario creado', user: result.rows[0] });
     } catch (err) {
       console.error('Error interno:', err);
       res.status(500).json({ error: 'Error creando usuario' });
@@ -303,3 +304,16 @@
       res.status(500).json({ error: 'Error obteniendo usuarios' });
     }
   });
+
+  // ===================================================
+  // ROUTES MONTOS
+  // ===================================================
+  app.use("/api", router_monto)
+  // ===================================================
+  // ROUTES COMITE
+  // ===================================================
+  app.use("/api", router_comite)
+  // ===================================================
+  // ROUTES ROLES
+  // ===================================================
+  app.use("/api", router_roles)
