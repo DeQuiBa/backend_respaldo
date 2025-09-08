@@ -178,10 +178,9 @@
   // Endpoint de login con token de 1 hora
   app.post('/api/auth/login', async (req, res) => {
     try {
-      const { correo, password } = req.body;
+      const { email, password } = req.body;
 
-      // Validar campos
-      if (!correo || !password) {
+      if (!email || !password) {
         return res.status(400).json({ error: 'Correo y contraseña son requeridos' });
       }
 
@@ -192,7 +191,7 @@
         FROM usuarios u
         JOIN roles r ON u.fk_rol = r.id
         WHERE u.email = $1`,
-        [correo]
+        [email]
       );
 
       if (userResult.rows.length === 0) {
@@ -201,7 +200,6 @@
 
       const user = userResult.rows[0];
 
-      // Verificar estado
       if (user.estado !== 'activo') {
         return res.status(403).json({ error: 'Usuario inactivo. Contacte al administrador.' });
       }
@@ -212,46 +210,123 @@
         return res.status(401).json({ error: 'Credenciales inválidas' });
       }
 
-      // Crear token JWT con 10 hora de duración
+      // Crear token JWT
       const token = jwt.sign(
         { 
           userId: user.id, 
-          email: user.correo,
+          email: user.email,   // ✅ corregido
           rol: user.rol,
-          rolId: user.rol_id
+          rolId: user.fk_rol   // ✅ corregido
         },
         process.env.JWT_SECRET,
-        { expiresIn: '10h' } // sino hay actividad por 3000 milesegundos se elimina el token 
+        { expiresIn: '10h' }
       );
 
-      // Datos de usuario a enviar (sin password)
+      // Datos de usuario correctos
       const userData = {
         id: user.id,
-        nombre: `${user.primer_nombre} ${user.apellido_paterno}`,
-        email: user.correo,
+        nombre: `${user.nombres} ${user.apellidos}`, // ✅ corregido
+        email: user.email,
         rol: user.rol,
-        rolId: user.rol_id
+        rolId: user.fk_rol
       };
 
       res.json({ token, user: userData });
+
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Error en el servidor' });
     }
   });
-  
+
   // Endpoint para verificar token
   app.get('/api/auth/verify', authenticateToken, (req, res) => {
-   res.json({ 
-     valid: true, 
-     user: {
-       id: req.user.userId,
-       email: req.user.email,
-       rol: req.user.rol,
-       rolId: req.user.rolId
-     }
-   });
+    res.json({ 
+      valid: true, 
+      user: {
+        id: req.user.userId,
+        email: req.user.email,
+        rolId: req.user.rolId
+      }
+    });
   });
+
+  // Endpoint para obtener datos del usuario
+  app.get('/api/usuarios/me', authenticateToken, async (req, res) => {
+    console.log('User ID from token:', req.user.userId);
+
+    try {
+      const userId = req.user.userId;
+
+      if (!userId || isNaN(userId)) {
+        return res.status(400).json({ error: 'ID de usuario inválido' });
+      }
+
+      let result;
+      try {
+        result = await pool.query(`
+          SELECT 
+            u.id,
+            u.nombres,
+            u.apellidos,
+            u.email,
+            u.fk_comite AS comiteId,
+            c.nombre AS comiteNombre,
+            u.fk_rol AS rolId,
+            r.nombre_rol AS rol,
+            u.estado
+          FROM usuarios u
+          LEFT JOIN roles r ON u.fk_rol = r.id
+          LEFT JOIN comite c ON u.fk_comite = c.id
+          WHERE u.id = $1
+        `, [userId]);
+      } catch (dbError) {
+        console.error('Error en consulta SQL:', {
+          message: dbError.message,
+          query: dbError.query,
+          parameters: dbError.parameters
+        });
+        return res.status(500).json({ error: 'Error en la consulta a la base de datos' });
+      }
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
+
+      const user = result.rows[0];
+
+      if (user.estado !== 'activo') {
+        return res.status(403).json({ error: 'Usuario inactivo' });
+      }
+
+      // Respuesta estructurada
+      const userData = {
+        id: user.id,
+        nombres: user.nombres || '',
+        apellidos: user.apellidos || '',
+        email: user.email || '',
+        rol: user.rol || '',
+        rolId: user.rolId || null,
+        comiteId: user.comiteId || null,
+        comiteNombre: user.comiteNombre || '',
+        estado: user.estado || ''
+      };
+
+      res.json(userData);
+
+    } catch (err) {
+      console.error('Error en endpoint /api/usuarios/me:', {
+        message: err.message,
+        stack: err.stack
+      });
+      
+      res.status(500).json({ 
+        error: 'Error interno del servidor',
+        ...(process.env.NODE_ENV === 'development' && { details: err.message })
+      });
+    }
+  });
+
 
 
   // ===================================================
@@ -305,6 +380,10 @@
     }
   });
 
+
+
+
+  
   // ===================================================
   // ROUTES MONTOS
   // ===================================================
