@@ -13,6 +13,7 @@
   const { router_comite } = require('./routes/comite.routes');
   const { router_roles } = require('./routes/roles.routes');
   const { swaggerUi, swaggerSpec } = require('./config/swagger');
+  const FileType = require("file-type");
 
 const multer = require("multer");
 const upload = multer(); // usa memoria, no guarda archivos en disco
@@ -424,9 +425,6 @@ const upload = multer(); // usa memoria, no guarda archivos en disco
   });
 
 
-
-
-
   // Crear monto
   app.post("/api/montos", authenticateToken, upload.single("voucher"), async (req, res) => {
     try {
@@ -464,26 +462,35 @@ const upload = multer(); // usa memoria, no guarda archivos en disco
     }
   });
 
-  // Obtener todos los montos del usuario
-  app.get("/api/montos", authenticateToken, async (req, res) => {
-    try {
-      const userId = req.user.userId;
+    // Obtener todos los montos del usuario
 
-      const result = await pool.query(
-        `SELECT id, fecha, tipo_de_cuenta, actividad, codigo, cantidad::float8 as cantidad
-          FROM monto
-          WHERE fk_usuario = $1
-          ORDER BY fecha DESC;
-          `,
-        [userId]
-      );
+app.get("/api/montos", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const result = await pool.query(
+      `SELECT id, fecha, tipo_de_cuenta, actividad, codigo, cantidad::float8 as cantidad, voucher
+       FROM monto
+       WHERE fk_usuario = $1
+       ORDER BY fecha DESC;`,
+      [userId]
+    );
 
-      res.json(result.rows);
-    } catch (err) {
-      console.error("Error obteniendo montos:", err);
-      res.status(500).json({ error: "Error en el servidor" });
-    }
-  });
+    const rows = await Promise.all(result.rows.map(async (r) => {
+      if (!r.voucher) return { ...r, voucher: null };
+
+      const mime = await FileType.fromBuffer(r.voucher);
+      return {
+        ...r,
+        voucher: `data:${mime?.mime || "application/octet-stream"};base64,${r.voucher.toString("base64")}`,
+      };
+    }));
+
+    res.json(rows);
+  } catch (err) {
+    console.error("Error obteniendo montos:", err);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
 
   // Actualizar monto
   app.put("/api/montos/:id", authenticateToken, upload.single("voucher"), async (req, res) => {
@@ -557,6 +564,8 @@ const upload = multer(); // usa memoria, no guarda archivos en disco
       res.status(500).json({ error: "Error en el servidor" });
     }
   });
+
+
 
 
   // ===================================================
