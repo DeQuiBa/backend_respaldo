@@ -14,6 +14,9 @@
   const { router_roles } = require('./routes/roles.routes');
   const { swaggerUi, swaggerSpec } = require('./config/swagger');
 
+const multer = require("multer");
+const upload = multer(); // usa memoria, no guarda archivos en disco
+
   dotenv.config();
 
   //s Configuración de Express
@@ -175,7 +178,6 @@
   // Generar token JWT y login  
   // ===================================================
   
-  // Endpoint de login con token de 1 hora
   app.post('/api/auth/login', async (req, res) => {
     try {
       const { email, password } = req.body;
@@ -251,6 +253,7 @@
     });
   });
 
+
   // Endpoint para obtener datos del usuario
   app.get('/api/usuarios/me', authenticateToken, async (req, res) => {
     console.log('User ID from token:', req.user.userId);
@@ -262,32 +265,22 @@
         return res.status(400).json({ error: 'ID de usuario inválido' });
       }
 
-      let result;
-      try {
-        result = await pool.query(`
-          SELECT 
-            u.id,
-            u.nombres,
-            u.apellidos,
-            u.email,
-            u.fk_comite AS comiteId,
-            c.nombre AS comiteNombre,
-            u.fk_rol AS rolId,
-            r.nombre_rol AS rol,
-            u.estado
-          FROM usuarios u
-          LEFT JOIN roles r ON u.fk_rol = r.id
-          LEFT JOIN comite c ON u.fk_comite = c.id
-          WHERE u.id = $1
-        `, [userId]);
-      } catch (dbError) {
-        console.error('Error en consulta SQL:', {
-          message: dbError.message,
-          query: dbError.query,
-          parameters: dbError.parameters
-        });
-        return res.status(500).json({ error: 'Error en la consulta a la base de datos' });
-      }
+      const result = await pool.query(`
+        SELECT 
+          u.id,
+          u.nombres,
+          u.apellidos,
+          u.email,
+          u.fk_comite AS "comiteId",
+          c.nombre AS "comiteNombre",
+          u.fk_rol AS "rolId",
+          r.nombre_rol AS rol,
+          u.estado
+        FROM usuarios u
+        LEFT JOIN roles r ON u.fk_rol = r.id
+        LEFT JOIN comite c ON u.fk_comite = c.id
+        WHERE u.id = $1
+      `, [userId]);
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Usuario no encontrado' });
@@ -299,7 +292,6 @@
         return res.status(403).json({ error: 'Usuario inactivo' });
       }
 
-      // Respuesta estructurada
       const userData = {
         id: user.id,
         nombres: user.nombres || '',
@@ -312,21 +304,14 @@
         estado: user.estado || ''
       };
 
+      console.log('Datos enviados al frontend:', userData);
       res.json(userData);
 
     } catch (err) {
-      console.error('Error en endpoint /api/usuarios/me:', {
-        message: err.message,
-        stack: err.stack
-      });
-      
-      res.status(500).json({ 
-        error: 'Error interno del servidor',
-        ...(process.env.NODE_ENV === 'development' && { details: err.message })
-      });
+      console.error('Error en endpoint /api/usuarios/me:', err);
+      res.status(500).json({ error: 'Error interno del servidor' });
     }
   });
-
 
 
   // ===================================================
@@ -380,10 +365,200 @@
     }
   });
 
+  // ===================================================
+  // COMITE ACTUALIZADO
+  // ===================================================
+
+ // PUT /api/usuarios/:id - Actualizar usuario
+  app.put('/api/usuarios/:id', authenticateToken, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { nombres, apellidos, comiteId } = req.body;
+
+      // Verifica que el usuario exista
+      const userCheck = await pool.query('SELECT id FROM usuarios WHERE id = $1', [id]);
+      if (userCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
+
+      // Seguridad: solo dueño del perfil o rol admin (rolId = 1)
+      if (req.user.userId !== parseInt(id) && req.user.rolId !== 1) {
+        return res.status(403).json({ error: 'No tienes permisos para actualizar este perfil' });
+      }
+
+      // Actualiza y devuelve datos
+      const result = await pool.query(`
+        UPDATE usuarios 
+        SET nombres = $1, apellidos = $2, fk_comite = $3, fecha_actualizacion = CURRENT_TIMESTAMP
+        WHERE id = $4
+        RETURNING id, nombres, apellidos, fk_comite as "comiteId",
+          (SELECT nombre FROM comite WHERE id = fk_comite) as "comiteNombre";
+      `, [nombres, apellidos, comiteId || null, id]);
+
+      res.json({ 
+        message: 'Usuario actualizado correctamente', 
+        user: result.rows[0] 
+      });
+
+    } catch (err) {
+      console.error('Error actualizando usuario:', err);
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  });
+
+  // GET /api/comites - Obtener lista de comités activos
+  app.get('/api/comites', authenticateToken, async (req, res) => {
+    try {
+      const result = await pool.query(`
+        SELECT id, nombre, epoca 
+        FROM comite 
+        WHERE estado = 'activo' 
+        ORDER BY nombre
+      `);
+      
+      res.json(result.rows);
+    } catch (err) {
+      console.error('Error obteniendo comités:', err);
+      res.status(500).json({ error: 'Error obteniendo comités' });
+    }
+  });
 
 
 
-  
+
+
+  // Crear monto
+  app.post("/api/montos", authenticateToken, upload.single("voucher"), async (req, res) => {
+    try {
+      const { fecha, tipo_de_cuenta, actividad, codigo, cantidad } = req.body;
+      const userId = req.user.userId;
+
+      if (!fecha || !tipo_de_cuenta || !actividad || !cantidad) {
+        return res.status(400).json({ error: "Datos incompletos" });
+      }
+
+      const cantidadNum = parseFloat(cantidad);
+      if (isNaN(cantidadNum) || cantidadNum <= 0) {
+        return res.status(400).json({ error: "Cantidad inválida" });
+      }
+
+      const result = await pool.query(
+        `INSERT INTO monto (fk_usuario, fecha, tipo_de_cuenta, actividad, codigo, voucher, cantidad)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        RETURNING *`,
+        [
+          userId,
+          fecha,
+          tipo_de_cuenta,
+          actividad,
+          codigo?.trim() || null,
+          req.file ? req.file.buffer : null,
+          cantidadNum,
+        ]
+      );
+
+      res.json(result.rows[0]);
+    } catch (err) {
+      console.error("Error insertando monto:", err);
+      res.status(500).json({ error: "Error en el servidor" });
+    }
+  });
+
+  // Obtener todos los montos del usuario
+  app.get("/api/montos", authenticateToken, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+
+      const result = await pool.query(
+        `SELECT id, fecha, tipo_de_cuenta, actividad, codigo, cantidad::float8 as cantidad
+          FROM monto
+          WHERE fk_usuario = $1
+          ORDER BY fecha DESC;
+          `,
+        [userId]
+      );
+
+      res.json(result.rows);
+    } catch (err) {
+      console.error("Error obteniendo montos:", err);
+      res.status(500).json({ error: "Error en el servidor" });
+    }
+  });
+
+  // Actualizar monto
+  app.put("/api/montos/:id", authenticateToken, upload.single("voucher"), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { fecha, tipo_de_cuenta, actividad, codigo, cantidad } = req.body;
+      const userId = req.user.userId;
+
+      if (!fecha || !tipo_de_cuenta || !actividad || !cantidad) {
+        return res.status(400).json({ error: "Datos incompletos" });
+      }
+
+      const cantidadNum = parseFloat(cantidad);
+      if (isNaN(cantidadNum) || cantidadNum <= 0) {
+        return res.status(400).json({ error: "Cantidad inválida" });
+      }
+
+      const voucher = req.file ? req.file.buffer : undefined;
+
+      const result = await pool.query(
+        `UPDATE monto
+        SET fecha=$1,
+            tipo_de_cuenta=$2,
+            actividad=$3,
+            codigo=$4,
+            voucher=COALESCE($5, voucher),
+            cantidad=$6
+        WHERE id=$7 AND fk_usuario=$8
+        RETURNING *`,
+        [
+          fecha,
+          tipo_de_cuenta,
+          actividad,
+          codigo?.trim() || null,
+          voucher, // $5
+          cantidadNum, // $6
+          id, // $7
+          userId // $8
+        ]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Monto no encontrado" });
+      }
+
+      res.json(result.rows[0]);
+    } catch (err) {
+      console.error("Error actualizando monto:", err);
+      res.status(500).json({ error: "Error en el servidor" });
+    }
+  });
+
+  // Eliminar monto
+  app.delete("/api/montos/:id", authenticateToken, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user.userId;
+
+      const result = await pool.query(
+        `DELETE FROM monto WHERE id=$1 AND fk_usuario=$2 RETURNING *`,
+        [id, userId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: "Monto no encontrado" });
+      }
+
+      res.json({ message: "Monto eliminado correctamente" });
+    } catch (err) {
+      console.error("Error eliminando monto:", err);
+      res.status(500).json({ error: "Error en el servidor" });
+    }
+  });
+
+
   // ===================================================
   // ROUTES MONTOS
   // ===================================================
