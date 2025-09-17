@@ -566,6 +566,122 @@ app.get("/api/montos", authenticateToken, async (req, res) => {
   });
 
 
+  // ---------------------------------
+  // USUARIOS
+  //------------------------------------
+
+  // GET /api/usuarios
+  app.get('/api/usuarios', authenticateToken, authorizeRoles(1), async (req, res) => { 
+    try {
+      const result = await pool.query(`
+        SELECT u.id, u.nombres, u.apellidos, u.email, u.estado, 
+              r.nombre_rol as rol, r.id as "rolId",
+              c.nombre as "comiteNombre"
+        FROM usuarios u
+        LEFT JOIN roles r ON u.fk_rol = r.id
+        LEFT JOIN comite c ON u.fk_comite = c.id
+        ORDER BY u.id ASC
+      `);
+      res.json(result.rows);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Error obteniendo usuarios' });
+    }
+  });
+
+      // PUT /api/usuarios/:id/rol
+    app.put('/api/usuarios/:id/rol', authenticateToken, authorizeRoles(1), async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { rolId } = req.body;
+
+        const result = await pool.query(`
+          UPDATE usuarios 
+          SET fk_rol = $1, fecha_actualizacion = CURRENT_TIMESTAMP
+          WHERE id = $2
+          RETURNING id, nombres, apellidos, email, fk_rol as "rolId"
+        `, [rolId, id]);
+
+        if (result.rows.length === 0) return res.status(404).json({ error: "Usuario no encontrado" });
+
+        res.json({ message: "Rol actualizado", user: result.rows[0] });
+      } catch (err) {
+        console.error("Error cambiando rol:", err);
+        res.status(500).json({ error: "Error interno del servidor" });
+      }
+    });
+
+    // PUT /api/usuarios/:id/estado
+    app.put('/api/usuarios/:id/estado', authenticateToken, authorizeRoles(1), async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { estado } = req.body; // "activo" o "inactivo"
+
+        if (!['activo', 'inactivo'].includes(estado)) {
+          return res.status(400).json({ error: "Estado inválido" });
+        }
+
+        const result = await pool.query(`
+          UPDATE usuarios 
+          SET estado = $1, fecha_actualizacion = CURRENT_TIMESTAMP
+          WHERE id = $2
+          RETURNING id, nombres, apellidos, email, estado
+        `, [estado, id]);
+
+        if (result.rows.length === 0) return res.status(404).json({ error: "Usuario no encontrado" });
+
+        res.json({ message: "Estado actualizado", user: result.rows[0] });
+      } catch (err) {
+        console.error("Error cambiando estado:", err);
+        res.status(500).json({ error: "Error interno del servidor" });
+      }
+    });
+
+
+    // GET /api/usuarios/:id/montos
+    app.get('/api/usuarios/:id/montos', authenticateToken, authorizeRoles(1), async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const result = await pool.query(`
+          SELECT m.id, m.fecha, m.tipo_de_cuenta, m.actividad, m.codigo, 
+                m.cantidad::float8 as cantidad, m.voucher
+          FROM monto m
+          WHERE m.fk_usuario = $1
+          ORDER BY m.fecha DESC
+        `, [id]);
+
+        res.json(result.rows);
+      } catch (err) {
+        console.error("Error obteniendo montos de usuario:", err);
+        res.status(500).json({ error: "Error en el servidor" });
+      }
+    });
+
+    // GET /api/usuarios/:id/montos/resumen
+    app.get('/api/usuarios/:id/montos/resumen', authenticateToken, authorizeRoles(1), async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const result = await pool.query(`
+          SELECT 
+            SUM(CASE WHEN tipo_de_cuenta = 'Ingreso' THEN cantidad ELSE 0 END)::float8 as ingresos,
+            SUM(CASE WHEN tipo_de_cuenta = 'Egreso' THEN cantidad ELSE 0 END)::float8 as egresos,
+            (SUM(CASE WHEN tipo_de_cuenta = 'Ingreso' THEN cantidad ELSE 0 END) -
+            SUM(CASE WHEN tipo_de_cuenta = 'Egreso' THEN cantidad ELSE 0 END))::float8 as balance
+          FROM monto
+          WHERE fk_usuario = $1
+        `, [id]);
+
+        res.json(result.rows[0]);
+      } catch (err) {
+        console.error("Error obteniendo resumen de montos:", err);
+        res.status(500).json({ error: "Error en el servidor" });
+      }
+    });
+
+
+
 
 
   // ===================================================
