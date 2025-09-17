@@ -8,10 +8,7 @@
   const { enviarCorreo } = require("./email/emailService");
   const crypto = require('crypto');
   const bcrypt = require('bcrypt');
-  
-  const { router_monto } = require('./routes/monto.routes');
-  const { router_comite } = require('./routes/comite.routes');
-  const { router_roles } = require('./routes/roles.routes');
+
   const { swaggerUi, swaggerSpec } = require('./config/swagger');
   const FileType = require("file-type");
 
@@ -680,19 +677,130 @@ app.get("/api/montos", authenticateToken, async (req, res) => {
       }
     });
 
+    // DELETE /api/usuarios/:id
+    app.delete('/api/usuarios/:id', authenticateToken, authorizeRoles(1), async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const result = await pool.query(`
+          DELETE FROM usuarios
+          WHERE id = $1
+          RETURNING id
+        `, [id]);
+
+        if (result.rows.length === 0) {
+          return res.status(404).json({ error: "Usuario no encontrado" });
+        }
+
+        res.json({ message: "Usuario eliminado exitosamente" });
+      } catch (err) {
+        console.error("Error eliminando usuario:", err);
+        res.status(500).json({ error: "Error interno del servidor" });
+      }
+    });
 
 
 
 
-  // ===================================================
-  // ROUTES MONTOS
-  // ===================================================
-  app.use("/api", router_monto)
-  // ===================================================
-  // ROUTES COMITE
-  // ===================================================
-  app.use("/api", router_comite)
-  // ===================================================
-  // ROUTES ROLES
-  // ===================================================
-  app.use("/api", router_roles)
+
+
+        /* --------------------- CRUD COMITE --------------------- */
+
+      // GET /api/comites -> listar todos los comites
+      app.get('/api/allcomites', authenticateToken, authorizeRoles(1), async (req, res) => {
+        try {
+          const result = await pool.query(`
+            SELECT id, nombre, epoca, estado
+            FROM comite
+            ORDER BY id ASC
+          `);
+          res.json(result.rows);
+        } catch (err) {
+          console.error("Error obteniendo comités:", err);
+          res.status(500).json({ error: "Error en el servidor" });
+        }
+      });
+
+      // GET /api/comites/:id -> obtener un comité por ID
+      app.get('/api/comites/:id', authenticateToken, authorizeRoles(1), async (req, res) => {
+        try {
+          const { id } = req.params;
+          const result = await pool.query(`
+            SELECT id, nombre, epoca, estado
+            FROM comite
+            WHERE id = $1
+          `, [id]);
+
+          if (result.rows.length === 0) return res.status(404).json({ error: "Comité no encontrado" });
+          res.json(result.rows[0]);
+        } catch (err) {
+          console.error("Error obteniendo comité:", err);
+          res.status(500).json({ error: "Error en el servidor" });
+        }
+      });
+
+      // POST /api/comites -> crear un nuevo comité
+      app.post('/api/comites', authenticateToken, authorizeRoles(1), async (req, res) => {
+        try {
+          const { nombre, epoca, estado } = req.body;
+          if (!nombre || !epoca) return res.status(400).json({ error: "Nombre y época son requeridos" });
+          if (estado && !['activo','inactivo'].includes(estado)) return res.status(400).json({ error: "Estado inválido" });
+
+          const result = await pool.query(`
+            INSERT INTO comite (nombre, epoca, estado)
+            VALUES ($1, $2, COALESCE($3,'activo'))
+            RETURNING id, nombre, epoca, estado
+          `, [nombre, epoca, estado]);
+
+          res.status(201).json({ message: "Comité creado", comite: result.rows[0] });
+        } catch (err) {
+          console.error("Error creando comité:", err);
+          res.status(500).json({ error: "Error en el servidor" });
+        }
+      });
+
+      // PUT /api/comites/:id -> actualizar comité
+      app.put('/api/comites/:id', authenticateToken, authorizeRoles(1), async (req, res) => {
+        try {
+          const { id } = req.params;
+          const { nombre, epoca, estado } = req.body;
+          if (!nombre && !epoca && !estado) return res.status(400).json({ error: "Debe enviar al menos un campo a actualizar" });
+          if (estado && !['activo','inactivo'].includes(estado)) return res.status(400).json({ error: "Estado inválido" });
+
+          const result = await pool.query(`
+            UPDATE comite
+            SET 
+              nombre = COALESCE($1, nombre),
+              epoca = COALESCE($2, epoca),
+              estado = COALESCE($3, estado)
+            WHERE id = $4
+            RETURNING id, nombre, epoca, estado
+          `, [nombre, epoca, estado, id]);
+
+          if (result.rows.length === 0) return res.status(404).json({ error: "Comité no encontrado" });
+          res.json({ message: "Comité actualizado", comite: result.rows[0] });
+        } catch (err) {
+          console.error("Error actualizando comité:", err);
+          res.status(500).json({ error: "Error en el servidor" });
+        }
+      });
+
+      // DELETE /api/comites/:id -> eliminar comité
+      app.delete('/api/comites/:id', authenticateToken, authorizeRoles(1), async (req, res) => {
+        try {
+          const { id } = req.params;
+          const result = await pool.query(`
+            DELETE FROM comite
+            WHERE id = $1
+            RETURNING id
+          `, [id]);
+
+          if (result.rows.length === 0) return res.status(404).json({ error: "Comité no encontrado" });
+          res.json({ message: "Comité eliminado exitosamente" });
+        } catch (err) {
+          console.error("Error eliminando comité:", err);
+          res.status(500).json({ error: "Error en el servidor" });
+        }
+      });
+
+
