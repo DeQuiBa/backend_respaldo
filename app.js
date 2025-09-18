@@ -804,3 +804,563 @@ app.get("/api/montos", authenticateToken, async (req, res) => {
       });
 
 
+
+
+      // ===================================================
+// DASHBOARD APIs - Agregar al final de server.js
+// ===================================================
+
+// ===================================================
+// ESTADÍSTICAS GENERALES DEL DASHBOARD
+// ===================================================
+
+// GET /api/dashboard/stats - Estadísticas generales del sistema
+app.get('/api/dashboard/stats', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const stats = await pool.query(`
+      SELECT 
+        (SELECT COUNT(*) FROM usuarios WHERE estado = 'activo') as usuarios_activos,
+        (SELECT COUNT(*) FROM usuarios WHERE estado = 'inactivo') as usuarios_inactivos,
+        (SELECT COUNT(*) FROM comite WHERE estado = 'activo') as comites_activos,
+        (SELECT COUNT(*) FROM monto) as total_transacciones,
+        (SELECT SUM(cantidad)::float8 FROM monto WHERE tipo_de_cuenta = 'Ingreso') as total_ingresos,
+        (SELECT SUM(cantidad)::float8 FROM monto WHERE tipo_de_cuenta = 'Egreso') as total_egresos,
+        (SELECT COUNT(*) FROM monto WHERE DATE(fecha) = CURRENT_DATE) as transacciones_hoy,
+        (SELECT COUNT(*) FROM usuarios WHERE DATE(fecha_creacion) >= CURRENT_DATE - INTERVAL '30 days') as usuarios_mes
+    `);
+    
+    const result = stats.rows[0];
+    
+    res.json({
+      usuarios: {
+        activos: parseInt(result.usuarios_activos) || 0,
+        inactivos: parseInt(result.usuarios_inactivos) || 0,
+        nuevos_mes: parseInt(result.usuarios_mes) || 0
+      },
+      comites: {
+        activos: parseInt(result.comites_activos) || 0
+      },
+      finanzas: {
+        total_ingresos: result.total_ingresos || 0,
+        total_egresos: result.total_egresos || 0,
+        balance: (result.total_ingresos || 0) - (result.total_egresos || 0),
+        total_transacciones: parseInt(result.total_transacciones) || 0,
+        transacciones_hoy: parseInt(result.transacciones_hoy) || 0
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error obteniendo estadísticas del dashboard:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ===================================================
+// GRÁFICOS Y ANÁLISIS FINANCIERO
+// ===================================================
+
+// GET /api/dashboard/ingresos-egresos-mensual
+app.get('/api/dashboard/ingresos-egresos-mensual', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const { year } = req.query;
+    const currentYear = year || new Date().getFullYear();
+    
+    const result = await pool.query(`
+      WITH meses AS (
+        SELECT generate_series(1, 12) as mes
+      )
+      SELECT 
+        m.mes,
+        COALESCE(SUM(CASE WHEN mo.tipo_de_cuenta = 'Ingreso' THEN mo.cantidad ELSE 0 END), 0)::float8 as ingresos,
+        COALESCE(SUM(CASE WHEN mo.tipo_de_cuenta = 'Egreso' THEN mo.cantidad ELSE 0 END), 0)::float8 as egresos
+      FROM meses m
+      LEFT JOIN monto mo ON EXTRACT(MONTH FROM mo.fecha) = m.mes 
+        AND EXTRACT(YEAR FROM mo.fecha) = $1
+      GROUP BY m.mes
+      ORDER BY m.mes
+    `, [currentYear]);
+
+    const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 
+                   'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    
+    const data = result.rows.map(row => ({
+      mes: meses[row.mes - 1],
+      mes_num: row.mes,
+      ingresos: row.ingresos,
+      egresos: row.egresos,
+      balance: row.ingresos - row.egresos
+    }));
+
+    res.json(data);
+  } catch (err) {
+    console.error('Error obteniendo datos mensuales:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// GET /api/dashboard/transacciones-por-usuario
+app.get('/api/dashboard/transacciones-por-usuario', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    
+    const result = await pool.query(`
+      SELECT 
+        u.nombres || ' ' || u.apellidos as nombre_completo,
+        u.email,
+        COUNT(m.id) as total_transacciones,
+        SUM(CASE WHEN m.tipo_de_cuenta = 'Ingreso' THEN m.cantidad ELSE 0 END)::float8 as total_ingresos,
+        SUM(CASE WHEN m.tipo_de_cuenta = 'Egreso' THEN m.cantidad ELSE 0 END)::float8 as total_egresos,
+        (SUM(CASE WHEN m.tipo_de_cuenta = 'Ingreso' THEN m.cantidad ELSE 0 END) -
+         SUM(CASE WHEN m.tipo_de_cuenta = 'Egreso' THEN m.cantidad ELSE 0 END))::float8 as balance
+      FROM usuarios u
+      LEFT JOIN monto m ON u.id = m.fk_usuario
+      WHERE u.estado = 'activo'
+      GROUP BY u.id, u.nombres, u.apellidos, u.email
+      HAVING COUNT(m.id) > 0
+      ORDER BY total_transacciones DESC
+      LIMIT $1
+    `, [limit]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error obteniendo transacciones por usuario:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// GET /api/dashboard/actividades-frecuentes
+app.get('/api/dashboard/actividades-frecuentes', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    
+    const result = await pool.query(`
+      SELECT 
+        actividad,
+        tipo_de_cuenta,
+        COUNT(*) as frecuencia,
+        SUM(cantidad)::float8 as monto_total,
+        AVG(cantidad)::float8 as monto_promedio
+      FROM monto
+      GROUP BY actividad, tipo_de_cuenta
+      ORDER BY frecuencia DESC, monto_total DESC
+      LIMIT $1
+    `, [limit]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error obteniendo actividades frecuentes:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// GET /api/dashboard/tendencia-semanal
+app.get('/api/dashboard/tendencia-semanal', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        DATE_TRUNC('week', fecha) as semana,
+        COUNT(*) as transacciones,
+        SUM(CASE WHEN tipo_de_cuenta = 'Ingreso' THEN cantidad ELSE 0 END)::float8 as ingresos,
+        SUM(CASE WHEN tipo_de_cuenta = 'Egreso' THEN cantidad ELSE 0 END)::float8 as egresos
+      FROM monto
+      WHERE fecha >= CURRENT_DATE - INTERVAL '12 weeks'
+      GROUP BY DATE_TRUNC('week', fecha)
+      ORDER BY semana DESC
+    `);
+
+    const data = result.rows.map(row => ({
+      semana: row.semana.toISOString().split('T')[0],
+      transacciones: parseInt(row.transacciones),
+      ingresos: row.ingresos,
+      egresos: row.egresos,
+      balance: row.ingresos - row.egresos
+    }));
+
+    res.json(data);
+  } catch (err) {
+    console.error('Error obteniendo tendencia semanal:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// GET /api/dashboard/distribucion-por-comite
+app.get('/api/dashboard/distribucion-por-comite', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        c.nombre as comite,
+        c.epoca,
+        COUNT(DISTINCT u.id) as usuarios_activos,
+        COUNT(m.id) as total_transacciones,
+        SUM(CASE WHEN m.tipo_de_cuenta = 'Ingreso' THEN m.cantidad ELSE 0 END)::float8 as ingresos,
+        SUM(CASE WHEN m.tipo_de_cuenta = 'Egreso' THEN m.cantidad ELSE 0 END)::float8 as egresos
+      FROM comite c
+      LEFT JOIN usuarios u ON c.id = u.fk_comite AND u.estado = 'activo'
+      LEFT JOIN monto m ON u.id = m.fk_usuario
+      WHERE c.estado = 'activo'
+      GROUP BY c.id, c.nombre, c.epoca
+      ORDER BY ingresos DESC
+    `);
+
+    const data = result.rows.map(row => ({
+      comite: row.comite,
+      epoca: row.epoca,
+      usuarios_activos: parseInt(row.usuarios_activos) || 0,
+      total_transacciones: parseInt(row.total_transacciones) || 0,
+      ingresos: row.ingresos || 0,
+      egresos: row.egresos || 0,
+      balance: (row.ingresos || 0) - (row.egresos || 0)
+    }));
+
+    res.json(data);
+  } catch (err) {
+    console.error('Error obteniendo distribución por comité:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// GET /api/dashboard/ultimas-transacciones
+app.get('/api/dashboard/ultimas-transacciones', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const { limit = 20 } = req.query;
+    
+    const result = await pool.query(`
+      SELECT 
+        m.id,
+        m.fecha,
+        m.tipo_de_cuenta,
+        m.actividad,
+        m.codigo,
+        m.cantidad::float8,
+        u.nombres || ' ' || u.apellidos as usuario,
+        u.email,
+        c.nombre as comite
+      FROM monto m
+      JOIN usuarios u ON m.fk_usuario = u.id
+      LEFT JOIN comite c ON u.fk_comite = c.id
+      ORDER BY m.fecha DESC, m.id DESC
+      LIMIT $1
+    `, [limit]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error obteniendo últimas transacciones:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ===================================================
+// REPORTES AVANZADOS
+// ===================================================
+
+// GET /api/dashboard/reporte-periodo
+app.get('/api/dashboard/reporte-periodo', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const { fecha_inicio, fecha_fin, comite_id, usuario_id } = req.query;
+    
+    if (!fecha_inicio || !fecha_fin) {
+      return res.status(400).json({ error: 'Fechas de inicio y fin son requeridas' });
+    }
+
+    let whereClause = 'WHERE m.fecha BETWEEN $1 AND $2';
+    let params = [fecha_inicio, fecha_fin];
+    let paramCount = 2;
+
+    if (comite_id) {
+      paramCount++;
+      whereClause += ` AND u.fk_comite = $${paramCount}`;
+      params.push(comite_id);
+    }
+
+    if (usuario_id) {
+      paramCount++;
+      whereClause += ` AND m.fk_usuario = $${paramCount}`;
+      params.push(usuario_id);
+    }
+
+    const result = await pool.query(`
+      SELECT 
+        COUNT(*) as total_transacciones,
+        COUNT(DISTINCT m.fk_usuario) as usuarios_involucrados,
+        SUM(CASE WHEN m.tipo_de_cuenta = 'Ingreso' THEN m.cantidad ELSE 0 END)::float8 as total_ingresos,
+        SUM(CASE WHEN m.tipo_de_cuenta = 'Egreso' THEN m.cantidad ELSE 0 END)::float8 as total_egresos,
+        AVG(CASE WHEN m.tipo_de_cuenta = 'Ingreso' THEN m.cantidad END)::float8 as promedio_ingresos,
+        AVG(CASE WHEN m.tipo_de_cuenta = 'Egreso' THEN m.cantidad END)::float8 as promedio_egresos,
+        MAX(m.cantidad)::float8 as transaccion_mayor,
+        MIN(m.cantidad)::float8 as transaccion_menor
+      FROM monto m
+      JOIN usuarios u ON m.fk_usuario = u.id
+      ${whereClause}
+    `, params);
+
+    const transacciones = await pool.query(`
+      SELECT 
+        m.fecha,
+        m.tipo_de_cuenta,
+        m.actividad,
+        m.codigo,
+        m.cantidad::float8,
+        u.nombres || ' ' || u.apellidos as usuario,
+        c.nombre as comite
+      FROM monto m
+      JOIN usuarios u ON m.fk_usuario = u.id
+      LEFT JOIN comite c ON u.fk_comite = c.id
+      ${whereClause}
+      ORDER BY m.fecha DESC, m.id DESC
+    `, params);
+
+    const resumen = result.rows[0];
+    
+    res.json({
+      resumen: {
+        total_transacciones: parseInt(resumen.total_transacciones) || 0,
+        usuarios_involucrados: parseInt(resumen.usuarios_involucrados) || 0,
+        total_ingresos: resumen.total_ingresos || 0,
+        total_egresos: resumen.total_egresos || 0,
+        balance: (resumen.total_ingresos || 0) - (resumen.total_egresos || 0),
+        promedio_ingresos: resumen.promedio_ingresos || 0,
+        promedio_egresos: resumen.promedio_egresos || 0,
+        transaccion_mayor: resumen.transaccion_mayor || 0,
+        transaccion_menor: resumen.transaccion_menor || 0
+      },
+      transacciones: transacciones.rows,
+      filtros: {
+        fecha_inicio,
+        fecha_fin,
+        comite_id: comite_id || null,
+        usuario_id: usuario_id || null
+      }
+    });
+
+  } catch (err) {
+    console.error('Error generando reporte de período:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ===================================================
+// MÉTRICAS DE RENDIMIENTO
+// ===================================================
+
+// GET /api/dashboard/metricas-rendimiento
+app.get('/api/dashboard/metricas-rendimiento', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      WITH fecha_actual AS (SELECT CURRENT_DATE as hoy),
+      mes_actual AS (
+        SELECT COUNT(*) as transacciones_mes,
+               SUM(cantidad)::float8 as monto_mes
+        FROM monto, fecha_actual
+        WHERE EXTRACT(MONTH FROM fecha) = EXTRACT(MONTH FROM hoy)
+          AND EXTRACT(YEAR FROM fecha) = EXTRACT(YEAR FROM hoy)
+      ),
+      mes_anterior AS (
+        SELECT COUNT(*) as transacciones_mes_ant,
+               SUM(cantidad)::float8 as monto_mes_ant
+        FROM monto, fecha_actual
+        WHERE fecha >= (hoy - INTERVAL '1 month')::date
+          AND fecha < DATE_TRUNC('month', hoy)
+      ),
+      usuarios_activos_mes AS (
+        SELECT COUNT(DISTINCT fk_usuario) as usuarios_activos
+        FROM monto, fecha_actual
+        WHERE fecha >= DATE_TRUNC('month', hoy)
+      )
+      SELECT 
+        ma.transacciones_mes,
+        ma.monto_mes,
+        mant.transacciones_mes_ant,
+        mant.monto_mes_ant,
+        uam.usuarios_activos,
+        CASE 
+          WHEN mant.transacciones_mes_ant > 0 THEN
+            ROUND(((ma.transacciones_mes - mant.transacciones_mes_ant)::float8 / mant.transacciones_mes_ant * 100), 2)
+          ELSE 0
+        END as crecimiento_transacciones,
+        CASE 
+          WHEN mant.monto_mes_ant > 0 THEN
+            ROUND(((ma.monto_mes - mant.monto_mes_ant) / mant.monto_mes_ant * 100), 2)
+          ELSE 0
+        END as crecimiento_monto
+      FROM mes_actual ma, mes_anterior mant, usuarios_activos_mes uam
+    `);
+
+    res.json(result.rows[0] || {});
+  } catch (err) {
+    console.error('Error obteniendo métricas de rendimiento:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ===================================================
+// AUDITORÍA Y LOGS
+// ===================================================
+
+// GET /api/dashboard/auditoria
+app.get('/api/dashboard/auditoria', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const { limit = 50, tabla, accion } = req.query;
+    
+    let whereClause = '';
+    let params = [];
+    let paramCount = 0;
+
+    if (tabla) {
+      paramCount++;
+      whereClause += `WHERE tabla = $${paramCount}`;
+      params.push(tabla);
+    }
+
+    if (accion) {
+      paramCount++;
+      whereClause += `${whereClause ? ' AND' : 'WHERE'} accion = $${paramCount}`;
+      params.push(accion);
+    }
+
+    paramCount++;
+    params.push(limit);
+
+    const result = await pool.query(`
+      SELECT 
+        id,
+        tabla,
+        accion,
+        usuario,
+        fecha,
+        datos_anteriores,
+        datos_nuevos
+      FROM auditoria
+      ${whereClause}
+      ORDER BY fecha DESC, id DESC
+      LIMIT $${paramCount}
+    `, params);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error obteniendo auditoría:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// GET /api/dashboard/auditoria/resumen
+app.get('/api/dashboard/auditoria/resumen', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        tabla,
+        accion,
+        COUNT(*) as cantidad,
+        MAX(fecha) as ultima_accion
+      FROM auditoria
+      WHERE fecha >= CURRENT_DATE - INTERVAL '30 days'
+      GROUP BY tabla, accion
+      ORDER BY cantidad DESC
+    `);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error obteniendo resumen de auditoría:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// ===================================================
+// EXPORTACIÓN DE DATOS
+// ===================================================
+
+// GET /api/dashboard/exportar/csv
+app.get('/api/dashboard/exportar/csv', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const { tipo, fecha_inicio, fecha_fin } = req.query;
+    
+    if (!tipo || !['transacciones', 'usuarios', 'comites'].includes(tipo)) {
+      return res.status(400).json({ error: 'Tipo de exportación inválido' });
+    }
+
+    let query = '';
+    let params = [];
+
+    switch (tipo) {
+      case 'transacciones':
+        query = `
+          SELECT 
+            m.fecha,
+            m.tipo_de_cuenta,
+            m.actividad,
+            m.codigo,
+            m.cantidad,
+            u.nombres || ' ' || u.apellidos as usuario,
+            u.email,
+            c.nombre as comite
+          FROM monto m
+          JOIN usuarios u ON m.fk_usuario = u.id
+          LEFT JOIN comite c ON u.fk_comite = c.id
+        `;
+        if (fecha_inicio && fecha_fin) {
+          query += ' WHERE m.fecha BETWEEN $1 AND $2';
+          params = [fecha_inicio, fecha_fin];
+        }
+        query += ' ORDER BY m.fecha DESC';
+        break;
+        
+      case 'usuarios':
+        query = `
+          SELECT 
+            u.nombres,
+            u.apellidos,
+            u.email,
+            u.estado,
+            r.nombre_rol as rol,
+            c.nombre as comite,
+            u.fecha_creacion
+          FROM usuarios u
+          LEFT JOIN roles r ON u.fk_rol = r.id
+          LEFT JOIN comite c ON u.fk_comite = c.id
+          ORDER BY u.fecha_creacion DESC
+        `;
+        break;
+        
+      case 'comites':
+        query = `
+          SELECT 
+            nombre,
+            epoca,
+            estado,
+            (SELECT COUNT(*) FROM usuarios WHERE fk_comite = comite.id) as usuarios_asociados
+          FROM comite
+          ORDER BY nombre
+        `;
+        break;
+    }
+
+    const result = await pool.query(query, params);
+    
+    // Convertir a CSV
+    if (result.rows.length === 0) {
+      return res.json({ error: 'No hay datos para exportar' });
+    }
+
+    const headers = Object.keys(result.rows[0]);
+    let csv = headers.join(',') + '\n';
+    
+    result.rows.forEach(row => {
+      const values = headers.map(header => {
+        const value = row[header];
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'string' && value.includes(',')) {
+          return `"${value.replace(/"/g, '""')}"`;
+        }
+        return value;
+      });
+      csv += values.join(',') + '\n';
+    });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=${tipo}_${new Date().toISOString().split('T')[0]}.csv`);
+    res.send(csv);
+
+  } catch (err) {
+    console.error('Error exportando datos:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
