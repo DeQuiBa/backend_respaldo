@@ -14,7 +14,7 @@ const transporter = nodemailer.createTransport({
 async function enviarCorreo(destinatario, asunto, html) {
   try {
     await transporter.sendMail({
-      from: `"SISGEFI-DK" <quibasheldon@gmail.com>`,
+      from: `"MASHA-SGF" <quibasheldon@gmail.com>`,
       to: destinatario,
       subject: asunto,
       html

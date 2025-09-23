@@ -1,101 +1,101 @@
-    -- 1. Comite
-    CREATE TABLE comite (
-        id SERIAL PRIMARY KEY,
-        nombre VARCHAR(100) NOT NULL,
-        epoca INT NOT NULL,
-        estado VARCHAR(20) DEFAULT 'activo' CHECK (estado IN ('activo','inactivo'))
-    );
+        -- 1. Comite
+        CREATE TABLE comite (
+            id SERIAL PRIMARY KEY,
+            nombre VARCHAR(100) NOT NULL,
+            epoca INT NOT NULL,
+            estado VARCHAR(20) DEFAULT 'activo' CHECK (estado IN ('activo','inactivo'))
+        );
 
-    -- 2. Roles
-    CREATE TABLE roles (
-        id SERIAL PRIMARY KEY,
-        nombre_rol VARCHAR(50) NOT NULL UNIQUE,
-        descripcion TEXT,
-        estado VARCHAR(20) DEFAULT 'activo' CHECK (estado IN ('activo','inactivo')),
-        fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+        -- 2. Roles
+        CREATE TABLE roles (
+            id SERIAL PRIMARY KEY,
+            nombre_rol VARCHAR(50) NOT NULL UNIQUE,
+            descripcion TEXT,
+            estado VARCHAR(20) DEFAULT 'activo' CHECK (estado IN ('activo','inactivo')),
+            fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
 
-    -- 3. Usuarios
-    CREATE TABLE usuarios (
-        id SERIAL PRIMARY KEY,
-        nombres VARCHAR(100) NOT NULL,
-        apellidos VARCHAR(100) NOT NULL,
-        email VARCHAR(150) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        fk_comite INT REFERENCES comite(id) ON DELETE SET NULL,
-        fk_rol INT REFERENCES roles(id) NOT NULL,
-        estado VARCHAR(20) DEFAULT 'activo' CHECK (estado IN ('activo','inactivo')),
-        fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+        -- 3. Usuarios
+        CREATE TABLE usuarios (
+            id SERIAL PRIMARY KEY,
+            nombres VARCHAR(100) NOT NULL,
+            apellidos VARCHAR(100) NOT NULL,
+            email VARCHAR(150) UNIQUE NOT NULL,
+            password VARCHAR(255) NOT NULL,
+            fk_comite INT REFERENCES comite(id) ON DELETE SET NULL,
+            fk_rol INT REFERENCES roles(id) NOT NULL,
+            estado VARCHAR(20) DEFAULT 'activo' CHECK (estado IN ('activo','inactivo')),
+            fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
 
-    -- 4. Monto
-    CREATE TABLE monto (
-        id SERIAL PRIMARY KEY,
-        fk_usuario INT REFERENCES usuarios(id) ON DELETE CASCADE,
-        fecha DATE NOT NULL,
-        tipo_de_cuenta VARCHAR(20) NOT NULL CHECK (tipo_de_cuenta IN ('Ingreso','Egreso')),
-        actividad TEXT NOT NULL,
-        codigo VARCHAR(50),
-        voucher BYTEA,
-        cantidad NUMERIC(12,2) NOT NULL
-    );
+        -- 4. Monto
+        CREATE TABLE monto (
+            id SERIAL PRIMARY KEY,
+            fk_usuario INT REFERENCES usuarios(id) ON DELETE CASCADE,
+            fecha DATE NOT NULL,
+            tipo_de_cuenta VARCHAR(20) NOT NULL CHECK (tipo_de_cuenta IN ('Ingreso','Egreso')),
+            actividad TEXT NOT NULL,
+            codigo VARCHAR(50),
+            voucher BYTEA,
+            cantidad NUMERIC(12,2) NOT NULL
+        );
 
-    -- 5. Password resets
-    CREATE TABLE password_resets (
-        id SERIAL PRIMARY KEY,
-        user_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-        token VARCHAR(255) NOT NULL UNIQUE,
-        expires_at TIMESTAMP NOT NULL,
-        used BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+        -- 5. Password resets
+        CREATE TABLE password_resets (
+            id SERIAL PRIMARY KEY,
+            user_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+            token VARCHAR(255) NOT NULL UNIQUE,
+            expires_at TIMESTAMP NOT NULL,
+            used BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
 
-    -- 6. Auditoria
-    CREATE TABLE auditoria (
-        id SERIAL PRIMARY KEY,
-        tabla VARCHAR(100) NOT NULL,
-        accion VARCHAR(20) NOT NULL CHECK (accion IN ('INSERT','UPDATE','DELETE')),
-        usuario TEXT NOT NULL DEFAULT current_user,
-        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        datos_anteriores JSONB,
-        datos_nuevos JSONB
-    );
+        -- 6. Auditoria
+        CREATE TABLE auditoria (
+            id SERIAL PRIMARY KEY,
+            tabla VARCHAR(100) NOT NULL,
+            accion VARCHAR(20) NOT NULL CHECK (accion IN ('INSERT','UPDATE','DELETE')),
+            usuario TEXT NOT NULL DEFAULT current_user,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            datos_anteriores JSONB,
+            datos_nuevos JSONB
+        );
 
 
-    -- 1. TRIGGER de auditoria
+        -- 1. TRIGGER de auditoria
 
-    CREATE OR REPLACE FUNCTION fn_auditoria()
-    RETURNS TRIGGER AS $$
-    BEGIN
-        IF (TG_OP = 'DELETE') THEN
-            INSERT INTO auditoria(tabla, accion, datos_anteriores)
-            VALUES (TG_TABLE_NAME, TG_OP, row_to_json(OLD));
-            RETURN OLD;
-        ELSIF (TG_OP = 'UPDATE') THEN
-            INSERT INTO auditoria(tabla, accion, datos_anteriores, datos_nuevos)
-            VALUES (TG_TABLE_NAME, TG_OP, row_to_json(OLD), row_to_json(NEW));
-            RETURN NEW;
-        ELSIF (TG_OP = 'INSERT') THEN
-            INSERT INTO auditoria(tabla, accion, datos_nuevos)
-            VALUES (TG_TABLE_NAME, TG_OP, row_to_json(NEW));
-            RETURN NEW;
-        END IF;
-        RETURN NULL;
-    END;
-    $$ LANGUAGE plpgsql;
+        CREATE OR REPLACE FUNCTION fn_auditoria()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            IF (TG_OP = 'DELETE') THEN
+                INSERT INTO auditoria(tabla, accion, datos_anteriores)
+                VALUES (TG_TABLE_NAME, TG_OP, row_to_json(OLD));
+                RETURN OLD;
+            ELSIF (TG_OP = 'UPDATE') THEN
+                INSERT INTO auditoria(tabla, accion, datos_anteriores, datos_nuevos)
+                VALUES (TG_TABLE_NAME, TG_OP, row_to_json(OLD), row_to_json(NEW));
+                RETURN NEW;
+            ELSIF (TG_OP = 'INSERT') THEN
+                INSERT INTO auditoria(tabla, accion, datos_nuevos)
+                VALUES (TG_TABLE_NAME, TG_OP, row_to_json(NEW));
+                RETURN NEW;
+            END IF;
+            RETURN NULL;
+        END;
+        $$ LANGUAGE plpgsql;
 
-    -- 2. TRIGGER - auditoria usuarios
+        -- 2. TRIGGER - auditoria usuarios
 
-    CREATE TRIGGER trg_auditoria_usuarios
-    AFTER INSERT OR UPDATE OR DELETE ON usuarios
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_auditoria();
+        CREATE TRIGGER trg_auditoria_usuarios
+        AFTER INSERT OR UPDATE OR DELETE ON usuarios
+        FOR EACH ROW
+        EXECUTE FUNCTION fn_auditoria();
 
-    -- 3. TRIGGER - auditoria monto 
+        -- 3. TRIGGER - auditoria monto 
 
-    CREATE TRIGGER trg_auditoria_monto
-    AFTER INSERT OR UPDATE OR DELETE ON monto
-    FOR EACH ROW
-    EXECUTE FUNCTION fn_auditoria();
+        CREATE TRIGGER trg_auditoria_monto
+        AFTER INSERT OR UPDATE OR DELETE ON monto
+        FOR EACH ROW
+        EXECUTE FUNCTION fn_auditoria();

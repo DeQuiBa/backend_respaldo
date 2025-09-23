@@ -66,12 +66,12 @@ const upload = multer(); // usa memoria, no guarda archivos en disco
 
   app.post('/api/auth/forgot-password', async (req, res) => {
     try {
-      const { correo } = req.body;
+      const { email } = req.body;
 
-      if (!correo) return res.status(400).json({ error: 'Correo requerido' });
+      if (!email) return res.status(400).json({ error: 'Email requerido' });
 
       // Buscar usuario
-      const result = await pool.query('SELECT id, correo FROM usuarios WHERE correo = $1', [correo]);
+      const result = await pool.query('SELECT id, email FROM usuarios WHERE email = $1', [email]);
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Usuario no encontrado' });
       }
@@ -80,7 +80,7 @@ const upload = multer(); // usa memoria, no guarda archivos en disco
 
       // Generar token
       const token = crypto.randomBytes(32).toString('hex');
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutos
 
       // Guardar token en la tabla
       await pool.query(
@@ -96,7 +96,7 @@ const upload = multer(); // usa memoria, no guarda archivos en disco
         <div style="font-family: Arial, sans-serif; background-color: #f0f2f5; padding: 40px; text-align: center;">
           <div style="background-color: #ffffff; max-width: 500px; margin: auto; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);">
             <h1 style="color: #1d4ed8; margin-bottom: 8px; font-size: 28px; text-align: center;">
-              SISGEFI-DK
+              MASHA-SGF
             </h1>
             <h2 style="color: #333; margin-bottom: 20px; font-size: 20px; text-align: center;">
               Sistema de Gestión Financiera – Ingresos y Egresos
@@ -117,7 +117,7 @@ const upload = multer(); // usa memoria, no guarda archivos en disco
         </div>
       `;
 
-      await enviarCorreo(user.correo, 'Recuperación de contraseña - SISGEFI-DK', html);
+      await enviarCorreo(user.email, 'Recuperación de contraseña - MASHA-SGF', html);
 
       res.json({ message: 'Correo de recuperación enviado' });
     } catch (err) {
@@ -1393,5 +1393,47 @@ app.get('/api/dashboard/exportar/csv', authenticateToken, authorizeRoles(1), asy
 });
 
 
+// Buscar monto por código
+app.get('/api/monto/:codigo', async (req, res) => {
+  const { codigo } = req.params;
 
+  try {
+    if (!codigo) {
+      return res.status(400).json({ error: 'El código es requerido' });
+    }
 
+    // Normalizamos el código en la búsqueda (case-insensitive y sin espacios extras)
+    const result = await pool.query(
+      `
+      SELECT 
+        m.id,
+        m.fecha,
+        m.tipo_de_cuenta,
+        m.actividad,
+        m.codigo,
+        m.cantidad,
+        encode(m.voucher, 'base64') AS voucher, -- bytea convertido a base64
+        u.id AS "usuarioId",
+        u.nombres AS "usuarioNombre",
+        u.apellidos AS "usuarioApellidos",
+        u.email AS "usuarioEmail",
+        c.id AS "comiteId",
+        c.nombre AS "comiteNombre"
+      FROM monto m
+      LEFT JOIN usuarios u ON m.fk_usuario = u.id
+      LEFT JOIN comite c ON u.fk_comite = c.id
+      WHERE TRIM(LOWER(m.codigo)) = TRIM(LOWER($1))
+      `,
+      [codigo]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: `No se encontró ningún monto con el código: ${codigo}` });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error en endpoint /api/monto/:codigo:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
