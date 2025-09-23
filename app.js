@@ -1,4 +1,4 @@
-  // server.js
+// server.js
   const express = require('express');
   const { Pool } = require('pg');
   const cors = require('cors');
@@ -636,24 +636,31 @@ app.get("/api/montos", authenticateToken, async (req, res) => {
 
 
     // GET /api/usuarios/:id/montos
-    app.get('/api/usuarios/:id/montos', authenticateToken, authorizeRoles(1), async (req, res) => {
-      try {
-        const { id } = req.params;
+// GET /api/usuarios/:id/montos
+app.get('/api/usuarios/:id/montos', authenticateToken, authorizeRoles(1, 64), async (req, res) => {
+  try {
+    const { id } = req.params;
 
-        const result = await pool.query(`
-          SELECT m.id, m.fecha, m.tipo_de_cuenta, m.actividad, m.codigo, 
-                m.cantidad::float8 as cantidad, m.voucher
-          FROM monto m
-          WHERE m.fk_usuario = $1
-          ORDER BY m.fecha DESC
-        `, [id]);
+    const result = await pool.query(`
+      SELECT m.id, 
+             m.fecha, 
+             m.tipo_de_cuenta, 
+             m.actividad, 
+             m.codigo, 
+             m.cantidad::float8 as cantidad, 
+             encode(m.voucher, 'base64') as voucher  -- 👈 conversión a base64
+      FROM monto m
+      WHERE m.fk_usuario = $1
+      ORDER BY m.fecha DESC
+    `, [id]);
 
-        res.json(result.rows);
-      } catch (err) {
-        console.error("Error obteniendo montos de usuario:", err);
-        res.status(500).json({ error: "Error en el servidor" });
-      }
-    });
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error obteniendo montos de usuario:", err);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+
 
     // GET /api/usuarios/:id/montos/resumen
     app.get('/api/usuarios/:id/montos/resumen', authenticateToken, authorizeRoles(1), async (req, res) => {
@@ -988,23 +995,26 @@ app.get('/api/dashboard/distribucion-por-comite', authenticateToken, authorizeRo
   try {
     const result = await pool.query(`
       SELECT 
+        c.id,
         c.nombre as comite,
         c.epoca,
+        c.estado,
         COUNT(DISTINCT u.id) as usuarios_activos,
         COUNT(m.id) as total_transacciones,
-        SUM(CASE WHEN m.tipo_de_cuenta = 'Ingreso' THEN m.cantidad ELSE 0 END)::float8 as ingresos,
-        SUM(CASE WHEN m.tipo_de_cuenta = 'Egreso' THEN m.cantidad ELSE 0 END)::float8 as egresos
+        COALESCE(SUM(CASE WHEN m.tipo_de_cuenta = 'Ingreso' THEN m.cantidad ELSE 0 END),0)::float8 as ingresos,
+        COALESCE(SUM(CASE WHEN m.tipo_de_cuenta = 'Egreso' THEN m.cantidad ELSE 0 END),0)::float8 as egresos
       FROM comite c
       LEFT JOIN usuarios u ON c.id = u.fk_comite AND u.estado = 'activo'
       LEFT JOIN monto m ON u.id = m.fk_usuario
-      WHERE c.estado = 'activo'
-      GROUP BY c.id, c.nombre, c.epoca
+      GROUP BY c.id, c.nombre, c.epoca, c.estado
       ORDER BY ingresos DESC
     `);
 
     const data = result.rows.map(row => ({
+      id: row.id,
       comite: row.comite,
       epoca: row.epoca,
+      estado: row.estado,
       usuarios_activos: parseInt(row.usuarios_activos) || 0,
       total_transacciones: parseInt(row.total_transacciones) || 0,
       ingresos: row.ingresos || 0,
@@ -1018,6 +1028,7 @@ app.get('/api/dashboard/distribucion-por-comite', authenticateToken, authorizeRo
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
+
 
 // GET /api/dashboard/ultimas-transacciones
 app.get('/api/dashboard/ultimas-transacciones', authenticateToken, authorizeRoles(1), async (req, res) => {
@@ -1078,6 +1089,7 @@ app.get('/api/dashboard/reporte-periodo', authenticateToken, authorizeRoles(1), 
       params.push(usuario_id);
     }
 
+    // Resumen de transacciones
     const result = await pool.query(`
       SELECT 
         COUNT(*) as total_transacciones,
@@ -1093,13 +1105,16 @@ app.get('/api/dashboard/reporte-periodo', authenticateToken, authorizeRoles(1), 
       ${whereClause}
     `, params);
 
+    // Listado de transacciones (incluyendo voucher)
     const transacciones = await pool.query(`
       SELECT 
+        m.id,
         m.fecha,
         m.tipo_de_cuenta,
         m.actividad,
         m.codigo,
         m.cantidad::float8,
+        m.voucher,
         u.nombres || ' ' || u.apellidos as usuario,
         c.nombre as comite
       FROM monto m
@@ -1108,6 +1123,17 @@ app.get('/api/dashboard/reporte-periodo', authenticateToken, authorizeRoles(1), 
       ${whereClause}
       ORDER BY m.fecha DESC, m.id DESC
     `, params);
+
+    // Convertir voucher bytea -> Base64
+    const transaccionesConVoucher = await Promise.all(transacciones.rows.map(async (t) => {
+      if (!t.voucher) return { ...t, voucher: null };
+
+      const mime = await FileType.fromBuffer(t.voucher);
+      return {
+        ...t,
+        voucher: `data:${mime?.mime || "application/octet-stream"};base64,${t.voucher.toString("base64")}`,
+      };
+    }));
 
     const resumen = result.rows[0];
     
@@ -1123,7 +1149,7 @@ app.get('/api/dashboard/reporte-periodo', authenticateToken, authorizeRoles(1), 
         transaccion_mayor: resumen.transaccion_mayor || 0,
         transaccion_menor: resumen.transaccion_menor || 0
       },
-      transacciones: transacciones.rows,
+      transacciones: transaccionesConVoucher,
       filtros: {
         fecha_inicio,
         fecha_fin,
@@ -1137,6 +1163,7 @@ app.get('/api/dashboard/reporte-periodo', authenticateToken, authorizeRoles(1), 
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
+
 
 // ===================================================
 // MÉTRICAS DE RENDIMIENTO
@@ -1364,3 +1391,7 @@ app.get('/api/dashboard/exportar/csv', authenticateToken, authorizeRoles(1), asy
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
+
+
+
+

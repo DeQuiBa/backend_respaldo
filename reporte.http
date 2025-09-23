@@ -1,0 +1,4 @@
+GET http://localhost:3050/api/dashboard/reporte-periodo?fecha_inicio=2025-09-01&fecha_fin=2025-09-18&comite_id=2&usuario_id=5
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjMxLCJlbWFpbCI6InF1aXNwZXNhbnRvc21hdGlhc0BnbWFpbC5jb20iLCJyb2wiOiJBZG1pbmlzdHJhZG9yIiwicm9sSWQiOjEsImlhdCI6MTc1ODIzMDE2NCwiZXhwIjoxNzU4MjY2MTY0fQ.FnZztNChMB27GMJMOEDP0RZgPDN9hFA5Fc1AnpBUaRc
+
