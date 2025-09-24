@@ -989,7 +989,7 @@ app.get('/api/dashboard/tendencia-semanal', authenticateToken, authorizeRoles(1)
   }
 });
 
-// GET /api/dashboard/distribucion-por-comite
+// GET /api/dashboard/distribucion-por-comite- f
 app.get('/api/dashboard/distribucion-por-comite', authenticateToken, authorizeRoles(1), async (req, res) => {
   try {
     const result = await pool.query(`
