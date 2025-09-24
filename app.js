@@ -461,33 +461,33 @@ const upload = multer(); // usa memoria, no guarda archivos en disco
 
     // Obtener todos los montos del usuario
 
-app.get("/api/montos", authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const result = await pool.query(
-      `SELECT id, fecha, tipo_de_cuenta, actividad, codigo, cantidad::float8 as cantidad, voucher
-       FROM monto
-       WHERE fk_usuario = $1
-       ORDER BY fecha DESC;`,
-      [userId]
-    );
+  app.get("/api/montos", authenticateToken, async (req, res) => {
+    try {
+      const userId = req.user.userId;
+      const result = await pool.query(
+        `SELECT id, fecha, tipo_de_cuenta, actividad, codigo, cantidad::float8 as cantidad, voucher
+        FROM monto
+        WHERE fk_usuario = $1
+        ORDER BY fecha DESC;`,
+        [userId]
+      );
 
-    const rows = await Promise.all(result.rows.map(async (r) => {
-      if (!r.voucher) return { ...r, voucher: null };
+      const rows = await Promise.all(result.rows.map(async (r) => {
+        if (!r.voucher) return { ...r, voucher: null };
 
-      const mime = await FileType.fromBuffer(r.voucher);
-      return {
-        ...r,
-        voucher: `data:${mime?.mime || "application/octet-stream"};base64,${r.voucher.toString("base64")}`,
-      };
-    }));
+        const mime = await FileType.fromBuffer(r.voucher);
+        return {
+          ...r,
+          voucher: `data:${mime?.mime || "application/octet-stream"};base64,${r.voucher.toString("base64")}`,
+        };
+      }));
 
-    res.json(rows);
-  } catch (err) {
-    console.error("Error obteniendo montos:", err);
-    res.status(500).json({ error: "Error en el servidor" });
-  }
-});
+      res.json(rows);
+    } catch (err) {
+      console.error("Error obteniendo montos:", err);
+      res.status(500).json({ error: "Error en el servidor" });
+    }
+  });
 
   // Actualizar monto
   app.put("/api/montos/:id", authenticateToken, upload.single("voucher"), async (req, res) => {
@@ -636,30 +636,29 @@ app.get("/api/montos", authenticateToken, async (req, res) => {
 
 
     // GET /api/usuarios/:id/montos
-// GET /api/usuarios/:id/montos
-app.get('/api/usuarios/:id/montos', authenticateToken, authorizeRoles(1, 64), async (req, res) => {
-  try {
-    const { id } = req.params;
+    app.get('/api/usuarios/:id/montos', authenticateToken, authorizeRoles(1, 64), async (req, res) => {
+      try {
+        const { id } = req.params;
 
-    const result = await pool.query(`
-      SELECT m.id, 
-             m.fecha, 
-             m.tipo_de_cuenta, 
-             m.actividad, 
-             m.codigo, 
-             m.cantidad::float8 as cantidad, 
-             encode(m.voucher, 'base64') as voucher  -- 👈 conversión a base64
-      FROM monto m
-      WHERE m.fk_usuario = $1
-      ORDER BY m.fecha DESC
-    `, [id]);
+        const result = await pool.query(`
+          SELECT m.id, 
+                m.fecha, 
+                m.tipo_de_cuenta, 
+                m.actividad, 
+                m.codigo, 
+                m.cantidad::float8 as cantidad, 
+                encode(m.voucher, 'base64') as voucher  -- 👈 conversión a base64
+          FROM monto m
+          WHERE m.fk_usuario = $1
+          ORDER BY m.fecha DESC
+        `, [id]);
 
-    res.json(result.rows);
-  } catch (err) {
-    console.error("Error obteniendo montos de usuario:", err);
-    res.status(500).json({ error: "Error en el servidor" });
-  }
-});
+        res.json(result.rows);
+      } catch (err) {
+        console.error("Error obteniendo montos de usuario:", err);
+        res.status(500).json({ error: "Error en el servidor" });
+      }
+    });
 
 
     // GET /api/usuarios/:id/montos/resumen
@@ -1437,3 +1436,83 @@ app.get('/api/monto/:codigo', async (req, res) => {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
+
+// ====================================================================
+// VER VOUCHER (IMAGEN) - SERVIR IMÁGENES DESDE BYTEA -- ENLACE DIRECTO
+// ===================================================================
+
+
+app.get("/api/montos/:id/voucher", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `SELECT voucher FROM monto WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0 || !result.rows[0].voucher) {
+      return res.status(404).json({ error: "Voucher no encontrado" });
+    }
+
+    const voucherBuffer = result.rows[0].voucher;
+
+    const mime = await FileType.fromBuffer(voucherBuffer);
+    const mimeType = mime?.mime || "image/jpeg";
+
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="voucher-${id}.${mime?.ext || "jpg"}"`
+    );
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.send(voucherBuffer);
+  } catch (err) {
+    console.error("Error obteniendo voucher:", err);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+
+// ✅ Ruta pública para obtener información del voucher
+app.get("/api/montos/:id/voucher/info", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `SELECT 
+        CASE 
+          WHEN voucher IS NOT NULL THEN true 
+          ELSE false 
+        END as has_voucher,
+        CASE 
+          WHEN voucher IS NOT NULL THEN octet_length(voucher)
+          ELSE 0 
+        END as size_bytes,
+        actividad,
+        fecha
+      FROM monto 
+      WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Transacción no encontrada" });
+    }
+
+    const row = result.rows[0];
+    res.json({
+      hasVoucher: row.has_voucher,
+      sizeBytes: row.size_bytes,
+      sizeMB: (row.size_bytes / 1024 / 1024).toFixed(2),
+      actividad: row.actividad,
+      fecha: row.fecha,
+      voucherUrl: row.has_voucher ? `/api/montos/${id}/voucher` : null
+    });
+
+  } catch (err) {
+    console.error("Error obteniendo información del voucher:", err);
+    res.status(500).json({ error: "Error en el servidor" });
+  }
+});
+
+
