@@ -12,9 +12,8 @@
   const { swaggerUi, swaggerSpec } = require('./config/swagger');
   const FileType = require("file-type");
 
-const multer = require("multer");
-const upload = multer(); // usa memoria, no guarda archivos en disco
-
+  const multer = require("multer");
+  const upload = multer(); // usa memoria, no guarda archivos en disco
   dotenv.config();
 
   //s Configuración de Express
@@ -989,7 +988,7 @@ app.get('/api/dashboard/tendencia-semanal', authenticateToken, authorizeRoles(1)
   }
 });
 
-// GET /api/dashboard/distribucion-por-comite- f
+// GET /api/dashboard/distribucion-por-comite - VERSIÓN CORREGIDA
 app.get('/api/dashboard/distribucion-por-comite', authenticateToken, authorizeRoles(1), async (req, res) => {
   try {
     const result = await pool.query(`
@@ -998,12 +997,13 @@ app.get('/api/dashboard/distribucion-por-comite', authenticateToken, authorizeRo
         c.nombre as comite,
         c.epoca,
         c.estado,
-        COUNT(DISTINCT u.id) as usuarios_activos,
+        COUNT(DISTINCT u.id) as total_usuarios,  -- Cambiado de usuarios_activos a total_usuarios
+        COUNT(DISTINCT CASE WHEN u.estado = 'activo' THEN u.id END) as usuarios_activos,  -- Mantener contador de activos
         COUNT(m.id) as total_transacciones,
         COALESCE(SUM(CASE WHEN m.tipo_de_cuenta = 'Ingreso' THEN m.cantidad ELSE 0 END),0)::float8 as ingresos,
         COALESCE(SUM(CASE WHEN m.tipo_de_cuenta = 'Egreso' THEN m.cantidad ELSE 0 END),0)::float8 as egresos
       FROM comite c
-      LEFT JOIN usuarios u ON c.id = u.fk_comite AND u.estado = 'activo'
+      LEFT JOIN usuarios u ON c.id = u.fk_comite  -- REMOVIDO: AND u.estado = 'activo'
       LEFT JOIN monto m ON u.id = m.fk_usuario
       GROUP BY c.id, c.nombre, c.epoca, c.estado
       ORDER BY ingresos DESC
@@ -1015,6 +1015,7 @@ app.get('/api/dashboard/distribucion-por-comite', authenticateToken, authorizeRo
       epoca: row.epoca,
       estado: row.estado,
       usuarios_activos: parseInt(row.usuarios_activos) || 0,
+      total_usuarios: parseInt(row.total_usuarios) || 0,  // Nuevo campo
       total_transacciones: parseInt(row.total_transacciones) || 0,
       ingresos: row.ingresos || 0,
       egresos: row.egresos || 0,
