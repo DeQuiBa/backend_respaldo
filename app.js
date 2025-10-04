@@ -1610,3 +1610,76 @@ app.get("/api/montos/:id/voucher/info", async (req, res) => {
 });
 
 
+/*Obtener detalles de un monto para búsqueda*/
+
+
+// GET /api/monto/codigo/:codigo - Obtener detalles de un monto por su código
+app.get('/api/monto/codigo/:codigo', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const { codigo } = req.params;
+
+    if (!codigo) {
+      return res.status(400).json({ error: 'El código del monto es requerido' });
+    }
+
+    // Buscar monto con información detallada
+    const result = await pool.query(`
+      SELECT 
+        m.id,
+        m.fecha,
+        m.tipo_de_cuenta,
+        m.actividad,
+        m.codigo,
+        m.cantidad::float8,
+        m.estado_voucher,
+        m.voucher,
+        u.nombres AS usuario_nombre,
+        u.apellidos AS usuario_apellidos,
+        u.email AS usuario_email,
+        c.nombre AS comite
+      FROM monto m
+      JOIN usuarios u ON m.fk_usuario = u.id
+      LEFT JOIN comite c ON u.fk_comite = c.id
+      WHERE m.codigo = $1
+    `, [codigo]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Monto no encontrado' });
+    }
+
+    const monto = result.rows[0];
+
+    // Procesar el voucher
+    if (monto.voucher) {
+      try {
+        const mime = await FileType.fromBuffer(monto.voucher);
+        monto.voucher = `data:${mime?.mime || 'application/octet-stream'};base64,${monto.voucher.toString('base64')}`;
+      } catch (e) {
+        console.warn('Error al procesar voucher:', e);
+        monto.voucher = null;
+      }
+    } else {
+      monto.voucher = null;
+    }
+
+    // Enviar respuesta clara
+    res.json({
+      id: monto.id,
+      fecha: monto.fecha,
+      tipo_de_cuenta: monto.tipo_de_cuenta,
+      actividad: monto.actividad,
+      codigo: monto.codigo,
+      cantidad: monto.cantidad,
+      estado_voucher: monto.estado_voucher,
+      voucher: monto.voucher,   // ✅ Imagen lista para <img src={...}>
+      usuarioNombre: monto.usuario_nombre,
+      usuarioApellidos: monto.usuario_apellidos,
+      usuarioEmail: monto.usuario_email,
+      comiteNombre: monto.comite
+    });
+
+  } catch (err) {
+    console.error('Error obteniendo monto por código:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
