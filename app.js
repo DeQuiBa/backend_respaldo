@@ -27,7 +27,7 @@
   // CORS
   const corsOptions = {
     origin: process.env.FRONTEND_URL || '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   };
   app.use(cors(corsOptions));
 
@@ -1099,13 +1099,16 @@ app.get('/api/dashboard/reporte-periodo', authenticateToken, authorizeRoles(1), 
         AVG(CASE WHEN m.tipo_de_cuenta = 'Ingreso' THEN m.cantidad END)::float8 as promedio_ingresos,
         AVG(CASE WHEN m.tipo_de_cuenta = 'Egreso' THEN m.cantidad END)::float8 as promedio_egresos,
         MAX(m.cantidad)::float8 as transaccion_mayor,
-        MIN(m.cantidad)::float8 as transaccion_menor
+        MIN(m.cantidad)::float8 as transaccion_menor,
+        COUNT(CASE WHEN m.estado_voucher = 'pendiente' THEN 1 END) as vouchers_pendientes,
+        COUNT(CASE WHEN m.estado_voucher = 'valido' THEN 1 END) as vouchers_validos,
+        COUNT(CASE WHEN m.estado_voucher = 'invalido' THEN 1 END) as vouchers_invalidos
       FROM monto m
       JOIN usuarios u ON m.fk_usuario = u.id
       ${whereClause}
     `, params);
 
-    // Listado de transacciones (incluyendo voucher)
+    // Listado de transacciones (incluyendo voucher y estado)
     const transacciones = await pool.query(`
       SELECT 
         m.id,
@@ -1115,6 +1118,7 @@ app.get('/api/dashboard/reporte-periodo', authenticateToken, authorizeRoles(1), 
         m.codigo,
         m.cantidad::float8,
         m.voucher,
+        m.estado_voucher,
         u.nombres || ' ' || u.apellidos as usuario,
         c.nombre as comite
       FROM monto m
@@ -1127,7 +1131,7 @@ app.get('/api/dashboard/reporte-periodo', authenticateToken, authorizeRoles(1), 
     // Convertir voucher bytea -> Base64
     const transaccionesConVoucher = await Promise.all(transacciones.rows.map(async (t) => {
       if (!t.voucher) return { ...t, voucher: null };
-
+      
       const mime = await FileType.fromBuffer(t.voucher);
       return {
         ...t,
@@ -1147,7 +1151,10 @@ app.get('/api/dashboard/reporte-periodo', authenticateToken, authorizeRoles(1), 
         promedio_ingresos: resumen.promedio_ingresos || 0,
         promedio_egresos: resumen.promedio_egresos || 0,
         transaccion_mayor: resumen.transaccion_mayor || 0,
-        transaccion_menor: resumen.transaccion_menor || 0
+        transaccion_menor: resumen.transaccion_menor || 0,
+        vouchers_pendientes: parseInt(resumen.vouchers_pendientes) || 0,
+        vouchers_validos: parseInt(resumen.vouchers_validos) || 0,
+        vouchers_invalidos: parseInt(resumen.vouchers_invalidos) || 0
       },
       transacciones: transaccionesConVoucher,
       filtros: {
@@ -1157,13 +1164,99 @@ app.get('/api/dashboard/reporte-periodo', authenticateToken, authorizeRoles(1), 
         usuario_id: usuario_id || null
       }
     });
-
+   
   } catch (err) {
     console.error('Error generando reporte de período:', err);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 
+// PATCH /api/monto/:id/estado - Cambiar estado del voucher
+app.patch('/api/monto/:id/estado', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { estado_voucher } = req.body;
+
+    // Validar que el estado sea válido
+    const estadosValidos = ['pendiente', 'valido', 'invalido'];
+    if (!estado_voucher || !estadosValidos.includes(estado_voucher)) {
+      return res.status(400).json({ 
+        error: 'Estado inválido. Debe ser: pendiente, valido o invalido' 
+      });
+    }
+
+    // Verificar que el monto existe
+    const verificar = await pool.query(
+      'SELECT id FROM monto WHERE id = $1',
+      [id]
+    );
+
+    if (verificar.rows.length === 0) {
+      return res.status(404).json({ error: 'Monto no encontrado' });
+    }
+
+    // Actualizar el estado
+    const resultado = await pool.query(
+      `UPDATE monto 
+       SET estado_voucher = $1 
+       WHERE id = $2 
+       RETURNING id, estado_voucher, fecha, actividad, cantidad::float8`,
+      [estado_voucher, id]
+    );
+
+    res.json({
+      mensaje: 'Estado actualizado correctamente',
+      monto: resultado.rows[0]
+    });
+
+  } catch (err) {
+    console.error('Error actualizando estado del voucher:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// GET /api/monto/:id - Obtener detalles de un monto específico
+app.get('/api/monto/:id', authenticateToken, authorizeRoles(1), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const resultado = await pool.query(`
+      SELECT 
+        m.id,
+        m.fecha,
+        m.tipo_de_cuenta,
+        m.actividad,
+        m.codigo,
+        m.cantidad::float8,
+        m.estado_voucher,
+        m.voucher,
+        u.nombres || ' ' || u.apellidos as usuario,
+        c.nombre as comite
+      FROM monto m
+      JOIN usuarios u ON m.fk_usuario = u.id
+      LEFT JOIN comite c ON u.fk_comite = c.id
+      WHERE m.id = $1
+    `, [id]);
+
+    if (resultado.rows.length === 0) {
+      return res.status(404).json({ error: 'Monto no encontrado' });
+    }
+
+    const monto = resultado.rows[0];
+
+    // Convertir voucher si existe
+    if (monto.voucher) {
+      const mime = await FileType.fromBuffer(monto.voucher);
+      monto.voucher = `data:${mime?.mime || "application/octet-stream"};base64,${monto.voucher.toString("base64")}`;
+    }
+
+    res.json(monto);
+
+  } catch (err) {
+    console.error('Error obteniendo monto:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
 
 // ===================================================
 // MÉTRICAS DE RENDIMIENTO

@@ -39,8 +39,11 @@
             actividad TEXT NOT NULL,
             codigo VARCHAR(50),
             voucher BYTEA,
-            cantidad NUMERIC(12,2) NOT NULL
+            cantidad NUMERIC(12,2) NOT NULL,
+            estado_voucher VARCHAR(20) NOT NULL DEFAULT 'pendiente'
+                CHECK (estado_voucher IN ('pendiente', 'valido', 'invalido'))
         );
+
 
         -- 5. Password resets
         CREATE TABLE password_resets (
@@ -99,3 +102,4 @@
         AFTER INSERT OR UPDATE OR DELETE ON monto
         FOR EACH ROW
         EXECUTE FUNCTION fn_auditoria();
+

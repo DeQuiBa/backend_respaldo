@@ -1,4 +1,13 @@
-GET http://localhost:3050/api/dashboard/distribucion-por-comite
+### Cambiar estado del voucher
+PATCH http://localhost:3050/api/monto/42/estado
 Content-Type: application/json
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjUwLCJlbWFpbCI6ImRlaXZpczI5MTIwM0BnbWFpbC5jb20iLCJyb2wiOiJBZG1pbmlzdHJhZG9yIiwicm9sSWQiOjEsImlhdCI6MTc1ODY5ODQ3NywiZXhwIjoxNzU4NzM0NDc3fQ.I_KbyREDGx1M99QjJWewul191F7S2Zp1dtcY7iaz85Y
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjUwLCJlbWFpbCI6ImRlaXZpczI5MTIwM0BnbWFpbC5jb20iLCJyb2wiOiJBZG1pbmlzdHJhZG9yIiwicm9sSWQiOjEsImlhdCI6MTc1OTU1MDMxNCwiZXhwIjoxNzU5NTg2MzE0fQ.wxyGJjnXYQ9hnTgT-ELLsFzKsMDK34pYJDRl0hnXEqY
 
+{
+  "estado_voucher": "pendiente"
+}
+
+### 🔎 Obtener detalles del monto (GET)
+GET http://localhost:3050/api/monto/42
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjUwLCJlbWFpbCI6ImRlaXZpczI5MTIwM0BnbWFpbC5jb20iLCJyb2wiOiJBZG1pbmlzdHJhZG9yIiwicm9sSWQiOjEsImlhdCI6MTc1OTU1MDMxNCwiZXhwIjoxNzU5NTg2MzE0fQ.wxyGJjnXYQ9hnTgT-ELLsFzKsMDK34pYJDRl0hnXEqY
+### 🔎 Obtener todos los montos (GET)
