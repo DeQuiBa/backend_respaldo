@@ -1614,7 +1614,7 @@ app.get("/api/montos/:id/voucher/info", async (req, res) => {
 
 
 // GET /api/monto/codigo/:codigo - Obtener detalles de un monto por su código
-app.get('/api/monto/codigo/:codigo', authenticateToken, authorizeRoles(1), async (req, res) => {
+app.get('/api/monto/codigo/:codigo', authenticateToken, async (req, res) => {
   try {
     const { codigo } = req.params;
 
