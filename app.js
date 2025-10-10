@@ -40,6 +40,11 @@
     port: process.env.DB_PORT,
   });
 
+  const PORT = process.env.PORT || 3050;
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor corriendo en el puerto ${PORT}`);
+  });
+
   // Endpoint de prueba
   app.get('/', async (req, res) => {
     try {
@@ -50,14 +55,6 @@
       res.status(500).json({ error: 'Error conectando a la base de datos' });
     }
   });
-
-  // Puerto del servidor
-  const PORT = process.env.PORT || 3050;
-  app.listen(PORT, () => {
-    console.log(`Servidor corriendo en http://localhost:${PORT}`);
-    console.log(`Docs Swagger en http://localhost:${PORT}/api-docs`);
-  });
-
 
    // ===================================================
   // Envio de la contraseña
